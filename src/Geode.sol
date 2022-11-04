@@ -7,40 +7,128 @@ import {ERC1155Supply} from "openzeppelin-contracts/token/ERC1155/extensions/ERC
 import {Ownable} from "openzeppelin-contracts/access/Ownable.sol";
 import {AccessControl} from "openzeppelin-contracts/access/AccessControl.sol";
 
-contract Geode is ERC1155, ERC1155Burnable, ERC1155Supply, AccessControl {
-    uint256 public _tokenIds;
+import {VRFConsumerBaseV2} from "chainlink/VRFConsumerBaseV2.sol";
+import {VRFCoordinatorV2Interface} from "chainlink/interfaces/VRFCoordinatorV2Interface.sol";
+import {LinkTokenInterface} from "chainlink/interfaces/LinkTokenInterface.sol";
+
+contract Geode is
+    ERC1155,
+    ERC1155Burnable,
+    ERC1155Supply,
+    AccessControl,
+    VRFConsumerBaseV2
+{
+    /// -----------------------------------------------------------------------
+    /// Structs
+    /// -----------------------------------------------------------------------
+
+    struct CrackGeode {
+        address owner;
+        uint256 tokenId;
+    }
+
+    /// -----------------------------------------------------------------------
+    /// Events
+    /// -----------------------------------------------------------------------
+
+    event crackGeodeRequested(
+        address indexed requester,
+        uint256 indexed tokenId,
+        uint256 indexed requestId
+    );
+
+    event geodeCracked();
+
+    /// -----------------------------------------------------------------------
+    /// Errors
+    /// -----------------------------------------------------------------------
+
+    error Geode__AccountDoesNotOwnThatTokenId();
+    error Geode__TokenIdDoesNotExist();
+
+    /// -----------------------------------------------------------------------
+    /// Chainlink VRFConsumerBaseV2 variables
+    /// -----------------------------------------------------------------------
+
+    VRFCoordinatorV2Interface immutable COORDINATOR;
+    LinkTokenInterface immutable LINKTOKEN;
+    bytes32 immutable s_keyHash;
+    uint64 immutable s_subscriptionId;
+    uint32 immutable s_callbackGasLimit = 100000;
+    uint16 immutable s_requestConfirmations = 3;
+    uint32 public immutable s_numWords = 1;
+
+    /// -----------------------------------------------------------------------
+    /// Storage variables
+    /// -----------------------------------------------------------------------
+
+    /// @notice requestId => CrackGeode
+    mapping(uint256 => CrackGeode) public requestIdToSender;
+
+    uint256 public tokenCounter;
     bytes32 public constant MINTER_ROLE = keccak256("MINTER_ROLE");
 
-    // error Geode__ArrayLengthsDiffer();
+    /// -----------------------------------------------------------------------
+    /// Constructor
+    /// -----------------------------------------------------------------------
 
     // Add the staking contract address as input to constructor -> grantRole(address(stakingContract), MINTER_ROLE)
-    constructor(string memory _uri) payable ERC1155(_uri) {
+    constructor(
+        uint64 subscriptionId,
+        address vrfCoordinator,
+        address link,
+        bytes32 keyHash,
+        string memory _uri
+    ) payable ERC1155(_uri) VRFConsumerBaseV2(vrfCoordinator) {
         _setupRole(DEFAULT_ADMIN_ROLE, _msgSender());
+
+        COORDINATOR = VRFCoordinatorV2Interface(vrfCoordinator);
+        LINKTOKEN = LinkTokenInterface(link);
+        s_keyHash = keyHash;
+        s_subscriptionId = subscriptionId;
     }
+
+    /// -----------------------------------------------------------------------
+    /// User actions
+    /// -----------------------------------------------------------------------
+
+    function crackGeode(uint256 tokenId) external returns (uint256 requestId) {
+        if (tokenId > tokenCounter) revert Geode__TokenIdDoesNotExist();
+
+        if (balanceOf(msg.sender, tokenId) == 0)
+            revert Geode__AccountDoesNotOwnThatTokenId();
+
+        requestId = COORDINATOR.requestRandomWords(
+            s_keyHash,
+            s_subscriptionId,
+            s_requestConfirmations,
+            s_callbackGasLimit,
+            s_numWords
+        );
+
+        requestIdToSender[requestId] = CrackGeode({
+            owner: msg.sender,
+            tokenId: tokenId
+        });
+
+        emit crackGeodeRequested(msg.sender, tokenId, requestId);
+    }
+
+    function fulfillRandomWords(uint256 requestId, uint256[] memory randomWords)
+        internal
+        override
+    {
+        uint256 s_randomWords = (randomWords[0] % 100) + 1;
+    }
+
+    /// -----------------------------------------------------------------------
+    /// Role actions (MINTER, DEFAULT_ADMIN_ROLE)
+    /// -----------------------------------------------------------------------
 
     function mint(address account) external onlyRole(MINTER_ROLE) {
-        _mint(account, _tokenIds, 1, "");
-        _tokenIds++;
+        _mint(account, tokenCounter, 1, "");
+        tokenCounter++;
     }
-
-    // UNLIKELY TO MINT MULTIPLE AT A TIME? IF NOT, THEN DELETE THIS.
-    //    function mintBatch(
-    //        address to,
-    //        uint256 idsLength,
-    //        uint256[] memory amounts
-    //    ) external onlyRole(MINTER_ROLE) {
-    //        if (amounts.length != idsLength) revert Geode__ArrayLengthsDiffer();
-    //
-    //        uint256[] memory ids = new uint256[](idsLength);
-    //
-    //        for (uint256 i; i < idsLength; ++i) {
-    //            ids[i] = _tokenIds + i;
-    //        }
-    //
-    //        _mintBatch(to, ids, amounts, "");
-    //
-    //        _tokenIds = _tokenIds + idsLength - 1;
-    //    }
 
     function setURI(string memory newuri)
         external
@@ -48,6 +136,10 @@ contract Geode is ERC1155, ERC1155Burnable, ERC1155Supply, AccessControl {
     {
         _setURI(newuri);
     }
+
+    /// -----------------------------------------------------------------------
+    /// Overrides
+    /// -----------------------------------------------------------------------
 
     function _beforeTokenTransfer(
         address operator,
