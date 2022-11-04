@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: UNLICENSED
 pragma solidity ^0.8.13;
 
+import {IridiumToken} from "./IridiumToken.sol";
+
 import {ERC1155} from "openzeppelin-contracts/token/ERC1155/ERC1155.sol";
 import {ERC1155Burnable} from "openzeppelin-contracts/token/ERC1155/extensions/ERC1155Burnable.sol";
 import {ERC1155Supply} from "openzeppelin-contracts/token/ERC1155/extensions/ERC1155Supply.sol";
@@ -37,7 +39,7 @@ contract Geode is
         uint256 indexed requestId
     );
 
-    event geodeCracked();
+    event geodeCracked(uint256 indexed randomNumber);
 
     /// -----------------------------------------------------------------------
     /// Errors
@@ -47,7 +49,7 @@ contract Geode is
     error Geode__TokenIdDoesNotExist();
 
     /// -----------------------------------------------------------------------
-    /// Chainlink VRFConsumerBaseV2 variables
+    /// Immutable parameters
     /// -----------------------------------------------------------------------
 
     VRFCoordinatorV2Interface immutable COORDINATOR;
@@ -62,8 +64,13 @@ contract Geode is
     /// Storage variables
     /// -----------------------------------------------------------------------
 
+    IridiumToken public iridium;
+
     /// @notice requestId => CrackGeode
     mapping(uint256 => CrackGeode) public requestIdToSender;
+
+    /// @notice address => number exercisable whitelist spots
+    mapping(address => uint256) public exercisableWhitelistSpots;
 
     uint256 public tokenCounter;
     bytes32 public constant MINTER_ROLE = keccak256("MINTER_ROLE");
@@ -74,13 +81,16 @@ contract Geode is
 
     // Add the staking contract address as input to constructor -> grantRole(address(stakingContract), MINTER_ROLE)
     constructor(
+        string memory _uri,
+        IridiumToken iridium_,
         uint64 subscriptionId,
         address vrfCoordinator,
         address link,
-        bytes32 keyHash,
-        string memory _uri
+        bytes32 keyHash
     ) payable ERC1155(_uri) VRFConsumerBaseV2(vrfCoordinator) {
         _setupRole(DEFAULT_ADMIN_ROLE, _msgSender());
+
+        iridium = iridium_;
 
         COORDINATOR = VRFCoordinatorV2Interface(vrfCoordinator);
         LINKTOKEN = LinkTokenInterface(link);
@@ -118,7 +128,24 @@ contract Geode is
         internal
         override
     {
-        uint256 s_randomWords = (randomWords[0] % 100) + 1;
+        CrackGeode memory cracked = requestIdToSender[requestId];
+
+        if (balanceOf(cracked.owner, cracked.tokenId) != 1)
+            revert Geode__AccountDoesNotOwnThatTokenId();
+
+        // burn(cracked.owner, cracked.tokenId, 1);
+
+        uint256 randomNumber = (randomWords[0] % 100) + 1;
+
+        if (randomNumber == 42) {
+            exercisableWhitelistSpots[cracked.owner]++;
+        }
+
+        if (randomNumber != 42) {
+            iridium.mint(cracked.owner, 10e18);
+        }
+
+        emit geodeCracked(randomNumber);
     }
 
     /// -----------------------------------------------------------------------
@@ -135,6 +162,13 @@ contract Geode is
         onlyRole(DEFAULT_ADMIN_ROLE)
     {
         _setURI(newuri);
+    }
+
+    function updateIridiumImplementation(IridiumToken iridium_)
+        external
+        onlyRole(DEFAULT_ADMIN_ROLE)
+    {
+        iridium = iridium_;
     }
 
     /// -----------------------------------------------------------------------
