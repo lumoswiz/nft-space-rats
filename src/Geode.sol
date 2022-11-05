@@ -61,6 +61,20 @@ contract Geode is ERC1155, ERC1155Burnable, ERC1155Supply, AccessControl {
         _burnBatch(account, ids, values);
     }
 
+    function balanceOfBatchSingleAddress(address account, uint256[] memory ids)
+        public
+        view
+        returns (uint256[] memory)
+    {
+        uint256[] memory batchBalances = new uint256[](ids.length);
+
+        for (uint256 i = 0; i < ids.length; ++i) {
+            batchBalances[i] = balanceOf(account, ids[i]);
+        }
+
+        return batchBalances;
+    }
+
     function setURI(string memory newuri)
         external
         onlyRole(DEFAULT_ADMIN_ROLE)

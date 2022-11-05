@@ -49,14 +49,66 @@ contract ProcessingPlantTest is Test {
         assertEq(plant.processRound(), 0);
     }
 
-    function test_processGeode() public {
+    function testCorrectness_processGeode() public {
         geode.mint(alice);
 
         startHoax(alice, alice);
         geode.setApprovalForAll(address(plant), true);
-        plant.processGeode(0);
 
-        assertEq(plant.processRound(), 1);
+        uint256 tokenId = 0;
+        plant.processGeode(tokenId);
+
+        uint256 processRound = plant.processRound();
+
+        // check processRound incremenets
+        assertEq(processRound, 1);
+
+        // check that ProcessingInfo set correctly
+        (uint256 startTime, uint256 endTime) = plant.roundInfo(processRound);
+        assertEq(startTime, block.timestamp);
+        assertEq(endTime, block.timestamp + 3 days);
+
+        // check that roundTokenIds updates correctly (checking array index 0)
+        uint256 id = plant.roundTokenIds(processRound, 0);
+        assertEq(id, tokenId);
+
+        // check that rewardsFor updates correctly
+        assertEq(alice, plant.rewardsFor(tokenId));
+    }
+
+    function testCorrectness_newProcessRound() public {
+        uint256 mintTotal = 4;
+
+        for (uint256 i; i < mintTotal; ++i) {
+            geode.mint(alice);
+        }
+
+        startHoax(alice, alice);
+        geode.setApprovalForAll(address(plant), true);
+
+        // tokenId = 0 @ index location 0 for processRound = 1
+        plant.processGeode(0);
+        // tokenId = 2 @ index location 1 for processRound = 1
+        plant.processGeode(2);
+
+        uint256 processRound = plant.processRound();
+
+        assertEq(processRound, 1);
+        assertEq(plant.roundTokenIds(processRound, 0), 0);
+        assertEq(plant.roundTokenIds(processRound, 1), 2);
+
+        // warp forward by 4 days (> 3 days for each processRound)
+        vm.warp(block.timestamp + 4 days);
+
+        // tokenId = 1 @ index location 0 for processRound = 2
+        plant.processGeode(1);
+        // tokenId = 3 @ index location 1 for processRound = 2
+        plant.processGeode(3);
+
+        processRound = plant.processRound();
+
+        assertEq(plant.roundTokenIds(processRound, 0), 1);
+        assertEq(plant.roundTokenIds(processRound, 1), 3);
     }
 
     /// -----------------------------------------------------------------------

@@ -24,6 +24,7 @@ contract GeodeUnitTest is Test {
     function setUp() public {
         geode = new Geode("");
 
+        // For testing purposes
         geode.grantRole(geode.MINTER_ROLE(), address(this));
     }
 
@@ -42,5 +43,22 @@ contract GeodeUnitTest is Test {
             geode.hasRole(geode.DEFAULT_ADMIN_ROLE(), address(this)),
             "Account is not the DEFAULT_ADMIN_ROLE"
         );
+    }
+
+    function test_balanceOfBatchSignleAddress() public {
+        uint256 mintTotal = 4;
+        uint256[] memory ids = new uint256[](mintTotal);
+
+        for (uint256 i; i < mintTotal; ++i) {
+            geode.mint(alice);
+            ids[i] = i;
+        }
+
+        uint256[] memory balances = geode.balanceOfBatchSingleAddress(
+            alice,
+            ids
+        );
+
+        emit log_array(balances);
     }
 }

@@ -38,6 +38,8 @@ contract ProcessingPlant is
     /// -----------------------------------------------------------------------
 
     error ProcessingPlant__AccountDoesNotOwnThatTokenId();
+    error ProcessingPlant__ProcessRoundIsNotOver();
+    error ProcessingPlant__PlantDoesNotCustodyAllTokenIds();
 
     /// -----------------------------------------------------------------------
     /// Immutable parameters
@@ -49,7 +51,6 @@ contract ProcessingPlant is
     uint64 immutable s_subscriptionId;
     uint32 immutable s_callbackGasLimit = 100000;
     uint16 immutable s_requestConfirmations = 3;
-    uint32 public immutable s_numWords = 1;
 
     /// -----------------------------------------------------------------------
     /// Storage variables
@@ -58,6 +59,7 @@ contract ProcessingPlant is
     Geode public geode;
 
     uint256 public processRound;
+    uint256 public lastFinishedProcessRound;
 
     /// @notice processRound => ProcessingInfo (startTime, endTime)
     mapping(uint256 => ProcessingInfo) public roundInfo;
@@ -71,8 +73,8 @@ contract ProcessingPlant is
     /// @notice address => number exercisable whitelist spots
     mapping(address => uint256) public exercisableWhitelistSpots;
 
-    /// @notice requestId => CrackGeode
-    mapping(uint256 => ProcessGeode) public requestIdToSender;
+    /// @notice processRound => requestId
+    mapping(uint256 => uint256) public roundRequestId;
 
     /// -----------------------------------------------------------------------
     /// Constructor
@@ -103,6 +105,7 @@ contract ProcessingPlant is
 
         // Begin new processing round if the last one is over
         if (block.timestamp > roundInfo[processRound].endTime) {
+            lastFinishedProcessRound = processRound;
             processRound++;
             roundInfo[processRound] = ProcessingInfo({
                 startTime: block.timestamp,
@@ -116,7 +119,36 @@ contract ProcessingPlant is
         rewardsFor[tokenId] = msg.sender;
     }
 
-    function requestRandomness() external onlyRole(DEFAULT_ADMIN_ROLE) {}
+    function requestRandomness(uint256 processRound_)
+        external
+        onlyRole(DEFAULT_ADMIN_ROLE)
+        returns (uint256 requestId)
+    {
+        if (block.timestamp < roundInfo[processRound_].endTime)
+            revert ProcessingPlant__ProcessRoundIsNotOver();
+
+        uint256[] memory balances = geode.balanceOfBatchSingleAddress(
+            address(this),
+            roundTokenIds[processRound_]
+        );
+
+        for (uint256 i; i < balances.length; ++i) {
+            if (balances[i] == 0)
+                revert ProcessingPlant__PlantDoesNotCustodyAllTokenIds();
+        }
+
+        uint32 s_numWords = uint32(roundTokenIds[processRound_].length);
+
+        requestId = COORDINATOR.requestRandomWords(
+            s_keyHash,
+            s_subscriptionId,
+            s_requestConfirmations,
+            s_callbackGasLimit,
+            s_numWords
+        );
+
+        roundRequestId[processRound_] = requestId;
+    }
 
     function fulfillRandomWords(uint256 requestId, uint256[] memory randomWords)
         internal
@@ -128,6 +160,13 @@ contract ProcessingPlant is
         onlyRole(DEFAULT_ADMIN_ROLE)
     {
         iridium = iridium_;
+    }
+
+    function updateGeodeImplementation(Geode geode_)
+        external
+        onlyRole(DEFAULT_ADMIN_ROLE)
+    {
+        geode = geode_;
     }
 
     function supportsInterface(bytes4 interfaceId)
