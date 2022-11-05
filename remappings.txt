@@ -3,3 +3,4 @@ openzeppelin-contracts/=lib/openzeppelin-contracts/contracts/
 chainlink-foundry/=lib/foundry-starter-kit/src/
 chainlink/=lib/chainlink/contracts/src/v0.8/
 bagholder/=lib/bagholder/src/
+v3-core/=lib/v3-core/contracts/

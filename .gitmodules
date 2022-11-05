@@ -4,12 +4,9 @@
 [submodule "lib/chainlink"]
 	path = lib/chainlink
 	url = https://github.com/smartcontractkit/chainlink
-[submodule "lib/foundry-starter-kit"]
-	path = lib/foundry-starter-kit
-	url = https://github.com/smartcontractkit/foundry-starter-kit
 [submodule "lib/openzeppelin-contracts"]
 	path = lib/openzeppelin-contracts
 	url = https://github.com/OpenZeppelin/openzeppelin-contracts
-[submodule "lib/bagholder"]
-	path = lib/bagholder
-	url = https://github.com/zeframlou/bagholder
+[submodule "lib/v3-core"]
+	path = lib/v3-core
+	url = https://github.com/Uniswap/v3-core
