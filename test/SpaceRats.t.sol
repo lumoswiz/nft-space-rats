@@ -9,7 +9,6 @@ contract SpaceRatsTest is Test {
     IridiumToken public iridium;
     SpaceRats public spaceRats;
 
-    uint256 internal constant IRIDIUM_INITIAL_TOKEN_SUPPLY = 1_000_000e18;
     uint256 internal constant COLLECTION_SIZE = 2000;
     uint256 internal constant MAX_BATCH_SIZE = 5;
     uint256 internal constant AMOUNT_FOR_WHITELIST = 1000;

@@ -2,3 +2,4 @@ forge-std/=lib/forge-std/src/
 openzeppelin-contracts/=lib/openzeppelin-contracts/contracts/
 chainlink-foundry/=lib/foundry-starter-kit/src/
 chainlink/=lib/chainlink/contracts/src/v0.8/
+bagholder/=lib/bagholder/src/
