@@ -47,6 +47,8 @@ contract ProcessingPlant is
     error ProcessingPlant__ProcessRoundIsNotOver();
     error ProcessingPlant__PlantDoesNotCustodyAllTokenIds();
     error ProcessingPlant__RequestIdDoesNotExist();
+    error ProcessingPlant__RequestIdUnfulfilled();
+    error ProcessingPlant__MismatchedArrayLengths();
 
     /// -----------------------------------------------------------------------
     /// Immutable parameters
@@ -162,7 +164,7 @@ contract ProcessingPlant is
         roundRequestId[processRound_] = requestId;
 
         s_requests[requestId] = RequestStatus({
-            randomWords: new uint256[](0),
+            randomWords: new uint256[](s_numWords),
             exists: true,
             fulfilled: false
         });
@@ -179,7 +181,26 @@ contract ProcessingPlant is
         s_requests[requestId].randomWords = randomWords;
     }
 
-    // function crackGeodes(uint256 processRound_) external onlyRole(DEFAULT_ADMIN_ROLE) {}
+    function crackGeodes(uint256 processRound_)
+        external
+        onlyRole(DEFAULT_ADMIN_ROLE)
+    {
+        if (block.timestamp < roundInfo[processRound_].endTime)
+            revert ProcessingPlant__ProcessRoundIsNotOver();
+
+        uint256 requestId = roundRequestId[processRound_];
+
+        if (s_requests[requestId].fulfilled != true)
+            revert ProcessingPlant__RequestIdUnfulfilled();
+
+        uint256[] memory tokenIds_ = roundTokenIds[processRound_];
+        uint256[] memory words_ = getRandomWords(requestId);
+
+        if (tokenIds_.length != words_.length)
+            revert ProcessingPlant__MismatchedArrayLengths();
+
+        // work out rewards and burn tokens
+    }
 
     function updateIridiumImplementation(IridiumToken iridium_)
         external
@@ -203,5 +224,13 @@ contract ProcessingPlant is
         returns (bool)
     {
         return super.supportsInterface(interfaceId);
+    }
+
+    function getRandomWords(uint256 _requestId)
+        public
+        view
+        returns (uint256[] memory words)
+    {
+        words = s_requests[_requestId].randomWords;
     }
 }
