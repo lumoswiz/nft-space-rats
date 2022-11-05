@@ -49,6 +49,7 @@ contract ProcessingPlant is
     error ProcessingPlant__RequestIdDoesNotExist();
     error ProcessingPlant__RequestIdUnfulfilled();
     error ProcessingPlant__MismatchedArrayLengths();
+    error ProcessingPlant__IridiumRewardsCannotBeZero();
 
     /// -----------------------------------------------------------------------
     /// Immutable parameters
@@ -66,6 +67,8 @@ contract ProcessingPlant is
     /// -----------------------------------------------------------------------
     IridiumToken public iridium;
     Geode public geode;
+
+    uint256 public iridiumRewards;
 
     uint256 public processRound;
     uint256 public lastFinishedProcessRound;
@@ -188,6 +191,9 @@ contract ProcessingPlant is
         if (block.timestamp < roundInfo[processRound_].endTime)
             revert ProcessingPlant__ProcessRoundIsNotOver();
 
+        if (iridiumRewards == 0)
+            revert ProcessingPlant__IridiumRewardsCannotBeZero();
+
         uint256 requestId = roundRequestId[processRound_];
 
         if (s_requests[requestId].fulfilled != true)
@@ -199,7 +205,32 @@ contract ProcessingPlant is
         if (tokenIds_.length != words_.length)
             revert ProcessingPlant__MismatchedArrayLengths();
 
-        // work out rewards and burn tokens
+        uint256[] memory values = new uint256[](tokenIds_.length);
+
+        for (uint256 i; i < values.length; ++i) {
+            values[i] = 1;
+        }
+
+        // Batch burn tokenIds
+        geode.burnBatch(address(this), tokenIds_, values);
+
+        // Allocate rewards
+        for (uint256 i; i < tokenIds_.length; ++i) {
+            address beneficiary = rewardsFor[tokenIds_[i]];
+
+            if (ranNum(words_[i]) == 100) {
+                exercisableWhitelistSpots[beneficiary]++;
+            }
+
+            iridium.mint(beneficiary, iridiumRewards);
+        }
+    }
+
+    function setIridiumRewardAmount(uint256 rewardAmount)
+        external
+        onlyRole(DEFAULT_ADMIN_ROLE)
+    {
+        iridiumRewards = rewardAmount;
     }
 
     function updateIridiumImplementation(IridiumToken iridium_)
@@ -232,5 +263,9 @@ contract ProcessingPlant is
         returns (uint256[] memory words)
     {
         words = s_requests[_requestId].randomWords;
+    }
+
+    function ranNum(uint256 x) public pure returns (uint256 y) {
+        y = (x % 100) + 1;
     }
 }

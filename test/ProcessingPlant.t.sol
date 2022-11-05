@@ -16,6 +16,7 @@ contract ProcessingPlantTest is Test {
     MockVRFCoordinatorV2 public vrfCoordinator;
 
     uint96 internal constant FUND_AMOUNT = 1_000 ether;
+    uint256 internal constant IRIDIUM_REWARD_AMOUNT = 10e18;
 
     // Blank init acceptable for testing
     uint64 subId;
@@ -41,10 +42,14 @@ contract ProcessingPlantTest is Test {
             keyHash
         );
 
+        plant.setIridiumRewardAmount(IRIDIUM_REWARD_AMOUNT);
+
         vrfCoordinator.addConsumer(subId, address(plant));
 
-        // For the purposes of testing
+        // Role Assignment
         geode.grantRole(geode.MINTER_ROLE(), address(this));
+        geode.grantRole(geode.BURNER_ROLE(), address(plant));
+        iridium.grantRole(iridium.MINTER_ROLE(), address(plant));
 
         assertEq(plant.processRound(), 0);
     }
@@ -154,7 +159,51 @@ contract ProcessingPlantTest is Test {
 
         uint256[] memory words = plant.getRandomWords(requestId);
 
-        emit log_array(words);
+        for (uint256 i; i < words.length; ++i) {
+            emit log_uint(ranNum(words[i]));
+        }
+    }
+
+    function test_canCrackGeodes() public {
+        // SETUP
+        geode.mint(alice);
+        geode.mint(alice);
+
+        startHoax(alice, alice);
+
+        geode.setApprovalForAll(address(plant), true);
+        plant.processGeode(0);
+        plant.processGeode(1);
+
+        uint256 processRound = plant.processRound();
+
+        vm.stopPrank();
+
+        // processRound 1 ends @ 3 days
+        vm.warp(block.timestamp + 4 days);
+
+        uint256 requestId = plant.requestRandomness(processRound);
+
+        vrfCoordinator.fulfillRandomWords(requestId, address(plant));
+
+        uint256 iridiumBalanceBefore = iridium.balanceOf(alice);
+
+        plant.crackGeodes(processRound);
+
+        assertEq(
+            iridium.balanceOf(alice) - iridiumBalanceBefore,
+            2 * plant.iridiumRewards()
+        );
+
+        // No one should have any geodes of tokenId = 0 or 1
+        assertEq(geode.balanceOf(alice, 0), 0);
+        assertEq(geode.balanceOf(alice, 1), 0);
+
+        assertEq(geode.balanceOf(address(plant), 0), 0);
+        assertEq(geode.balanceOf(address(plant), 1), 0);
+
+        // Alice should have one exercisable whitelist spot
+        assertEq(plant.exercisableWhitelistSpots(alice), 1);
     }
 
     /// -----------------------------------------------------------------------
@@ -172,4 +221,8 @@ contract ProcessingPlantTest is Test {
     //        }
     //        return words;
     //    }
+
+    function ranNum(uint256 x) public pure returns (uint256 y) {
+        y = (x % 100) + 1;
+    }
 }
