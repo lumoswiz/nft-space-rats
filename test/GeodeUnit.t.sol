@@ -22,22 +22,7 @@ contract GeodeUnitTest is Test {
     address alice = makeAddr("Alice");
 
     function setUp() public {
-        linkToken = new LinkToken();
-        vrfCoordinator = new MockVRFCoordinatorV2();
-        iridium = new IridiumToken();
-        subId = vrfCoordinator.createSubscription();
-        vrfCoordinator.fundSubscription(subId, FUND_AMOUNT);
-
-        geode = new Geode(
-            "",
-            iridium,
-            subId,
-            address(vrfCoordinator),
-            address(linkToken),
-            keyHash
-        );
-
-        vrfCoordinator.addConsumer(subId, address(geode));
+        geode = new Geode("");
 
         geode.grantRole(geode.MINTER_ROLE(), address(this));
     }
@@ -52,75 +37,10 @@ contract GeodeUnitTest is Test {
         assertEq(geode.balanceOf(alice, 0), 1);
     }
 
-    function test_canCrackGeode() public {
-        geode.mint(alice);
-
-        startHoax(alice, alice);
-
-        uint256 requestId = geode.crackGeode(0);
-    }
-
-    function test_canFulfillRandomness() public {
-        geode.mint(alice);
-
-        startHoax(alice);
-
-        uint256 requestId = geode.crackGeode(0);
-        uint256[] memory words = getWords(requestId);
-        vrfCoordinator.fulfillRandomWords(requestId, address(geode));
-
-        emit log_array(words);
-    }
-
-    function test_earnIridiumFromCrackingGeode() public {
-        geode.mint(alice);
-
-        startHoax(alice, alice);
-        uint256 iridiumBefore = iridium.balanceOf(alice);
-
-        uint256 requestId = geode.crackGeode(0);
-        uint256[] memory words = getWords(requestId);
-        vrfCoordinator.fulfillRandomWords(requestId, address(geode));
-
-        assertEq(iridium.balanceOf(alice) - iridiumBefore, 10e18);
-    }
-
-    function test_canUpdateIridiumImplementation() public {
-        address initialImplementation = address(geode.iridium());
-
-        IridiumToken iridium_ = new IridiumToken();
-
-        geode.updateIridiumImplementation(iridium_);
-
-        assertTrue(initialImplementation != address(geode.iridium()));
-    }
-
-    function test_cannotUpdateIridiumImplementationIfNotAdmin() public {
-        startHoax(alice, alice);
-
-        address initialImplementation = address(geode.iridium());
-
-        IridiumToken iridium_ = new IridiumToken();
-
-        vm.expectRevert();
-        geode.updateIridiumImplementation(iridium_);
-
-        assertTrue(initialImplementation == address(geode.iridium()));
-    }
-
-    /// -----------------------------------------------------------------------
-    /// Helper functions
-    /// -----------------------------------------------------------------------
-
-    function getWords(uint256 requestId)
-        public
-        view
-        returns (uint256[] memory)
-    {
-        uint256[] memory words = new uint256[](geode.s_numWords());
-        for (uint256 i = 0; i < geode.s_numWords(); i++) {
-            words[i] = uint256(keccak256(abi.encode(requestId, i)));
-        }
-        return words;
+    function test_defaultAdminRole() public {
+        require(
+            geode.hasRole(geode.DEFAULT_ADMIN_ROLE(), address(this)),
+            "Account is not the DEFAULT_ADMIN_ROLE"
+        );
     }
 }
