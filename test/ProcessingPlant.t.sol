@@ -111,6 +111,26 @@ contract ProcessingPlantTest is Test {
         assertEq(plant.roundTokenIds(processRound, 1), 3);
     }
 
+    function test_canRequestRandomness() public {
+        geode.mint(alice);
+        geode.mint(alice);
+
+        startHoax(alice, alice);
+
+        geode.setApprovalForAll(address(plant), true);
+        plant.processGeode(0);
+        plant.processGeode(1);
+
+        uint256 processRound = plant.processRound();
+
+        vm.stopPrank();
+
+        // processRound 1 ends @ 3 days
+        vm.warp(block.timestamp + 4 days);
+
+        uint256 requestId = plant.requestRandomness(processRound);
+    }
+
     /// -----------------------------------------------------------------------
     /// Helper functions
     /// -----------------------------------------------------------------------

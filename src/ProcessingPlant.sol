@@ -33,6 +33,12 @@ contract ProcessingPlant is
         uint256 endTime;
     }
 
+    struct RequestStatus {
+        bool fulfilled; // whether the request has been successfully fulfilled
+        bool exists; // whether a requestId exists
+        uint256[] randomWords;
+    }
+
     /// -----------------------------------------------------------------------
     /// Errors
     /// -----------------------------------------------------------------------
@@ -40,6 +46,7 @@ contract ProcessingPlant is
     error ProcessingPlant__AccountDoesNotOwnThatTokenId();
     error ProcessingPlant__ProcessRoundIsNotOver();
     error ProcessingPlant__PlantDoesNotCustodyAllTokenIds();
+    error ProcessingPlant__RequestIdDoesNotExist();
 
     /// -----------------------------------------------------------------------
     /// Immutable parameters
@@ -75,6 +82,9 @@ contract ProcessingPlant is
 
     /// @notice processRound => requestId
     mapping(uint256 => uint256) public roundRequestId;
+
+    /// @notice requestId => RequestStatus
+    mapping(uint256 => RequestStatus) public s_requests;
 
     /// -----------------------------------------------------------------------
     /// Constructor
@@ -119,6 +129,8 @@ contract ProcessingPlant is
         rewardsFor[tokenId] = msg.sender;
     }
 
+    // Consider using a MAX_BATCH_SIZE for `requestRandomness`
+    // Then track the next index to run request for in that processRound_
     function requestRandomness(uint256 processRound_)
         external
         onlyRole(DEFAULT_ADMIN_ROLE)
@@ -148,12 +160,26 @@ contract ProcessingPlant is
         );
 
         roundRequestId[processRound_] = requestId;
+
+        s_requests[requestId] = RequestStatus({
+            randomWords: new uint256[](0),
+            exists: true,
+            fulfilled: false
+        });
     }
 
     function fulfillRandomWords(uint256 requestId, uint256[] memory randomWords)
         internal
         override
-    {}
+    {
+        if (!s_requests[requestId].exists)
+            revert ProcessingPlant__RequestIdDoesNotExist();
+
+        s_requests[requestId].fulfilled = true;
+        s_requests[requestId].randomWords = randomWords;
+    }
+
+    // function crackGeodes(uint256 processRound_) external onlyRole(DEFAULT_ADMIN_ROLE) {}
 
     function updateIridiumImplementation(IridiumToken iridium_)
         external
