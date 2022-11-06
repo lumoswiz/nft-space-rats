@@ -8,9 +8,9 @@ import {ERC1155Burnable} from "openzeppelin-contracts/token/ERC1155/extensions/E
 import {ERC1155Supply} from "openzeppelin-contracts/token/ERC1155/extensions/ERC1155Supply.sol";
 import {AccessControl} from "openzeppelin-contracts/access/AccessControl.sol";
 
-import {VRFConsumerBaseV2} from "chainlink/VRFConsumerBaseV2.sol";
-import {VRFCoordinatorV2Interface} from "chainlink/interfaces/VRFCoordinatorV2Interface.sol";
-import {LinkTokenInterface} from "chainlink/interfaces/LinkTokenInterface.sol";
+import {VRFConsumerBaseV2} from "chainlink-contracts/VRFConsumerBaseV2.sol";
+import {VRFCoordinatorV2Interface} from "chainlink-contracts/interfaces/VRFCoordinatorV2Interface.sol";
+import {LinkTokenInterface} from "chainlink-contracts/interfaces/LinkTokenInterface.sol";
 
 contract Geode is ERC1155, ERC1155Burnable, ERC1155Supply, AccessControl {
     uint256 public tokenCounter;

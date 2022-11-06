@@ -9,9 +9,9 @@ import {ReentrancyGuard} from "openzeppelin-contracts/security/ReentrancyGuard.s
 import {ERC1155Holder} from "openzeppelin-contracts/token/ERC1155/utils/ERC1155Holder.sol";
 import {ERC1155Receiver} from "openzeppelin-contracts/token/ERC1155/utils/ERC1155Receiver.sol";
 
-import {VRFConsumerBaseV2} from "chainlink/VRFConsumerBaseV2.sol";
-import {VRFCoordinatorV2Interface} from "chainlink/interfaces/VRFCoordinatorV2Interface.sol";
-import {LinkTokenInterface} from "chainlink/interfaces/LinkTokenInterface.sol";
+import {VRFConsumerBaseV2} from "chainlink-contracts/VRFConsumerBaseV2.sol";
+import {VRFCoordinatorV2Interface} from "chainlink-contracts/interfaces/VRFCoordinatorV2Interface.sol";
+import {LinkTokenInterface} from "chainlink-contracts/interfaces/LinkTokenInterface.sol";
 
 contract ProcessingPlant is
     AccessControl,

@@ -2,13 +2,9 @@
 pragma solidity ^0.8.0;
 
 import {AccessControl} from "openzeppelin-contracts/access/AccessControl.sol";
+import {ReentrancyGuard} from "openzeppelin-contracts/security/ReentrancyGuard.sol";
 
-import {ERC20} from "solmate/tokens/ERC20.sol";
-import {ERC721} from "solmate/tokens/ERC721.sol";
 import {SafeCastLib} from "solmate/utils/SafeCastLib.sol";
-import {SafeTransferLib} from "solmate/utils/SafeTransferLib.sol";
-
-import {FullMath} from "v3-core/libraries/FullMath.sol";
 
 import "./Math.sol";
 import "./Structs.sol";
@@ -20,14 +16,12 @@ import {IncentiveId} from "./IncentiveId.sol";
 /// precious NFTs leave their wallets.
 /// @dev Uses an optimistic staking model where if someone staked and then transferred
 /// their NFT elsewhere, someone else can slash them and receive the staker's bond.
-contract AsteroidMining is AccessControl {
+contract AsteroidMining is AccessControl, ReentrancyGuard {
     /// -----------------------------------------------------------------------
     /// Library usage
     /// -----------------------------------------------------------------------
 
     using SafeCastLib for uint256;
-    using SafeTransferLib for ERC20;
-    using SafeTransferLib for address;
     using IncentiveId for IncentiveKey;
 
     /// -----------------------------------------------------------------------
@@ -35,36 +29,39 @@ contract AsteroidMining is AccessControl {
     /// -----------------------------------------------------------------------
 
     /// @notice Thrown when unstaking an NFT that hasn't been staked
-    error Bagholder__NotStaked();
+    error AsteroidMining__NotStaked();
 
     /// @notice Thrown when an unauthorized account tries to perform an action available
     /// only to the NFT's owner
-    error Bagholder__NotNftOwner();
+    error AsteroidMining__NotNftOwner();
 
     /// @notice Thrown when trying to slash someone who shouldn't be slashed
-    error Bagholder__NotPaperHand();
+    error AsteroidMining__NotPaperHand();
 
     /// @notice Thrown when staking an NFT that's already staked
-    error Bagholder__AlreadyStaked();
+    error AsteroidMining__AlreadyStaked();
 
     /// @notice Thrown when the bond provided by the staker differs from the specified amount
-    error Bagholder__BondIncorrect();
+    error AsteroidMining__BondIncorrect();
 
     /// @notice Thrown when creating an incentive using invalid parameters (e.g. start time is after end time)
-    error Bagholder__InvalidIncentiveKey();
+    error AsteroidMining__InvalidIncentiveKey();
 
     /// @notice Thrown when staking into an incentive that doesn't exist
-    error Bagholder__IncentiveNonexistent();
+    error AsteroidMining__IncentiveNonexistent();
 
     /// @notice Thrown when creating an incentive with a zero reward rate
-    error Bagholder__RewardAmountTooSmall();
+    error AsteroidMining__RewardAmountTooSmall();
 
     /// @notice Thrown when creating an incentive that already exists
-    error Bagholder__IncentiveAlreadyExists();
+    error AsteroidMining__IncentiveAlreadyExists();
 
     /// @notice Thrown when setting the protocol fee recipient to the zero address
     /// while having a non-zero protocol fee
-    error Bagholder_ProtocolFeeRecipientIsZero();
+    error AsteroidMining_ProtocolFeeRecipientIsZero();
+
+    /// @notice Thrown when call failed to send ether
+    error AsteroidMining__FailedToSendEther();
 
     /// -----------------------------------------------------------------------
     /// Events
@@ -130,6 +127,9 @@ contract AsteroidMining is AccessControl {
     /// @dev incentive ID => info
     mapping(bytes32 => IncentiveInfo) public incentiveInfos;
 
+    /// @notice Records total minging (staking) time for an account across incentives
+    mapping(address => uint256) public miningTime;
+
     /// @notice Stores the amount and recipient of the protocol fee
     ProtocolFeeInfo public protocolFeeInfo;
 
@@ -144,7 +144,7 @@ contract AsteroidMining is AccessControl {
             protocolFeeInfo_.fee != 0 &&
             protocolFeeInfo_.recipient == address(0)
         ) {
-            revert Bagholder_ProtocolFeeRecipientIsZero();
+            revert AsteroidMining_ProtocolFeeRecipientIsZero();
         }
         protocolFeeInfo = protocolFeeInfo_;
         emit SetProtocolFee(protocolFeeInfo_);
@@ -159,11 +159,7 @@ contract AsteroidMining is AccessControl {
     /// the call. Anyone can stake on behalf of anyone else, provided they provide the bond.
     /// @param key the incentive's key
     /// @param nftId the ID of the NFT
-    function stake(IncentiveKey calldata key, uint256 nftId)
-        external
-        payable
-        virtual
-    {
+    function stake(IncentiveKey calldata key, uint256 nftId) external payable {
         /// -----------------------------------------------------------------------
         /// Storage loads
         /// -----------------------------------------------------------------------
@@ -179,22 +175,27 @@ contract AsteroidMining is AccessControl {
 
         // check bond is correct
         if (msg.value != key.bondAmount) {
-            revert Bagholder__BondIncorrect();
+            revert AsteroidMining__BondIncorrect();
         }
 
         // check the NFT is not currently being staked in this incentive
         if (stakers[incentiveId][nftId] != address(0)) {
-            revert Bagholder__AlreadyStaked();
+            revert AsteroidMining__AlreadyStaked();
         }
 
         // ensure the incentive exists
         if (incentiveInfo.lastUpdateTime == 0) {
-            revert Bagholder__IncentiveNonexistent();
+            revert AsteroidMining__IncentiveNonexistent();
         }
 
         /// -----------------------------------------------------------------------
         /// State updates
         /// -----------------------------------------------------------------------
+
+        // accrue mining time (multiplier is numberOfStakedTokens)
+        miningTime[staker] +=
+            stakerInfo.numberOfStakedTokens *
+            (block.timestamp - stakerInfo.startedStaking);
 
         // accrue rewards
         (stakerInfo, incentiveInfo) = _accrueRewards(
@@ -208,6 +209,7 @@ contract AsteroidMining is AccessControl {
 
         // update staker state
         stakerInfo.numberOfStakedTokens += 1;
+        stakerInfo.startedStaking = block.timestamp; // UPDATES BLOCK.TIMESTAMP
         stakerInfos[incentiveId][staker] = stakerInfo;
 
         // update incentive state
@@ -225,7 +227,6 @@ contract AsteroidMining is AccessControl {
     function stakeMultiple(StakeMultipleInput[] calldata inputs)
         external
         payable
-        virtual
     {
         uint256 numInputs = inputs.length;
         uint256 totalBondRequired;
@@ -246,17 +247,22 @@ contract AsteroidMining is AccessControl {
 
             // check the NFT is not currently being staked in this incentive
             if (stakers[incentiveId][nftId] != address(0)) {
-                revert Bagholder__AlreadyStaked();
+                revert AsteroidMining__AlreadyStaked();
             }
 
             // ensure the incentive exists
             if (incentiveInfo.lastUpdateTime == 0) {
-                revert Bagholder__IncentiveNonexistent();
+                revert AsteroidMining__IncentiveNonexistent();
             }
 
             /// -----------------------------------------------------------------------
             /// State updates
             /// -----------------------------------------------------------------------
+
+            // accrue mining time (multiplier is numberOfStakedTokens)
+            miningTime[staker] +=
+                stakerInfo.numberOfStakedTokens *
+                (block.timestamp - stakerInfo.startedStaking);
 
             // accrue rewards
             (stakerInfo, incentiveInfo) = _accrueRewards(
@@ -270,6 +276,7 @@ contract AsteroidMining is AccessControl {
 
             // update staker state
             stakerInfo.numberOfStakedTokens += 1;
+            stakerInfo.startedStaking = block.timestamp; // UPDATES BLOCK.TIMESTAMP
             stakerInfos[incentiveId][staker] = stakerInfo;
 
             // update incentive state
@@ -286,7 +293,7 @@ contract AsteroidMining is AccessControl {
 
         // check bond is correct
         if (msg.value != totalBondRequired) {
-            revert Bagholder__BondIncorrect();
+            revert AsteroidMining__BondIncorrect();
         }
     }
 
@@ -299,21 +306,22 @@ contract AsteroidMining is AccessControl {
         IncentiveKey calldata key,
         uint256 nftId,
         address bondRecipient
-    ) external virtual {
+    ) external nonReentrant {
         /// -----------------------------------------------------------------------
         /// Validation
         /// -----------------------------------------------------------------------
 
         bytes32 incentiveId = key.compute();
+        address staker = key.nft.ownerOf(nftId);
 
         // check the NFT is currently being staked in the incentive
         if (stakers[incentiveId][nftId] != msg.sender) {
-            revert Bagholder__NotStaked();
+            revert AsteroidMining__NotStaked();
         }
 
         // check msg.sender owns the NFT
         if (key.nft.ownerOf(nftId) != msg.sender) {
-            revert Bagholder__NotNftOwner();
+            revert AsteroidMining__NotNftOwner();
         }
 
         /// -----------------------------------------------------------------------
@@ -327,6 +335,11 @@ contract AsteroidMining is AccessControl {
         /// State updates
         /// -----------------------------------------------------------------------
 
+        // accrue mining time (multiplier is numberOfStakedTokens)
+        miningTime[staker] +=
+            stakerInfo.numberOfStakedTokens *
+            (block.timestamp - stakerInfo.startedStaking);
+
         // accrue rewards
         (stakerInfo, incentiveInfo) = _accrueRewards(
             key,
@@ -339,6 +352,9 @@ contract AsteroidMining is AccessControl {
 
         // update staker state
         stakerInfo.numberOfStakedTokens -= 1;
+        if (stakerInfo.numberOfStakedTokens == 0) {
+            stakerInfo.startedStaking = 0; // UPDATES BLOCK.TIMESTAMP
+        }
         stakerInfos[incentiveId][msg.sender] = stakerInfo;
 
         // update incentive state
@@ -350,7 +366,8 @@ contract AsteroidMining is AccessControl {
         /// -----------------------------------------------------------------------
 
         // return bond to user
-        bondRecipient.safeTransferETH(key.bondAmount);
+        (bool sent, ) = bondRecipient.call{value: key.bondAmount}("");
+        if (!sent) revert AsteroidMining__FailedToSendEther();
 
         emit Unstake(msg.sender, incentiveId, nftId, bondRecipient);
     }
@@ -369,7 +386,7 @@ contract AsteroidMining is AccessControl {
         IncentiveKey calldata stakeKey,
         uint256 stakeNftId,
         address bondRecipient
-    ) external virtual {
+    ) external nonReentrant {
         /// -----------------------------------------------------------------------
         /// Validation
         /// -----------------------------------------------------------------------
@@ -379,22 +396,22 @@ contract AsteroidMining is AccessControl {
 
         // check the NFT is currently being staked in the unstake incentive
         if (stakers[unstakeIncentiveId][unstakeNftId] != msg.sender) {
-            revert Bagholder__NotStaked();
+            revert AsteroidMining__NotStaked();
         }
 
         // check msg.sender owns the unstaked NFT
         if (unstakeKey.nft.ownerOf(unstakeNftId) != msg.sender) {
-            revert Bagholder__NotNftOwner();
+            revert AsteroidMining__NotNftOwner();
         }
 
         // check there's enough bond
         if (unstakeKey.bondAmount < stakeKey.bondAmount) {
-            revert Bagholder__BondIncorrect();
+            revert AsteroidMining__BondIncorrect();
         }
 
         // check the staked NFT is not currently being staked in the stake incentive
         if (stakers[stakeIncentiveId][stakeNftId] != address(0)) {
-            revert Bagholder__AlreadyStaked();
+            revert AsteroidMining__AlreadyStaked();
         }
 
         /// -----------------------------------------------------------------------
@@ -410,6 +427,11 @@ contract AsteroidMining is AccessControl {
         /// State updates (Unstake)
         /// -----------------------------------------------------------------------
 
+        // accrue mining time (multiplier is numberOfStakedTokens)
+        miningTime[msg.sender] +=
+            stakerInfo.numberOfStakedTokens *
+            (block.timestamp - stakerInfo.startedStaking);
+
         // accrue rewards
         (stakerInfo, incentiveInfo) = _accrueRewards(
             unstakeKey,
@@ -422,6 +444,11 @@ contract AsteroidMining is AccessControl {
 
         // update staker state
         stakerInfo.numberOfStakedTokens -= 1;
+
+        if (stakerInfo.numberOfStakedTokens == 0) {
+            stakerInfo.startedStaking = 0; // UPDATES BLOCK.TIMESTAMP
+        }
+
         stakerInfos[unstakeIncentiveId][msg.sender] = stakerInfo;
 
         // update incentive state
@@ -445,12 +472,17 @@ contract AsteroidMining is AccessControl {
 
         // ensure the incentive exists
         if (incentiveInfo.lastUpdateTime == 0) {
-            revert Bagholder__IncentiveNonexistent();
+            revert AsteroidMining__IncentiveNonexistent();
         }
 
         /// -----------------------------------------------------------------------
         /// State updates (Stake)
         /// -----------------------------------------------------------------------
+
+        // accrue mining time (multiplier is numberOfStakedTokens)
+        miningTime[staker] +=
+            stakerInfo.numberOfStakedTokens *
+            (block.timestamp - stakerInfo.startedStaking);
 
         // accrue rewards
         (stakerInfo, incentiveInfo) = _accrueRewards(
@@ -464,6 +496,7 @@ contract AsteroidMining is AccessControl {
 
         // update staker state
         stakerInfo.numberOfStakedTokens += 1;
+        stakerInfo.startedStaking = block.timestamp;
         stakerInfos[stakeIncentiveId][staker] = stakerInfo;
 
         // update incentive state
@@ -480,9 +513,10 @@ contract AsteroidMining is AccessControl {
             unchecked {
                 // return extra bond to user
                 // already checked unstakeKey.bondAmount > stakeKey.bondAmount
-                bondRecipient.safeTransferETH(
-                    unstakeKey.bondAmount - stakeKey.bondAmount
-                );
+                (bool sent, ) = bondRecipient.call{
+                    value: unstakeKey.bondAmount - stakeKey.bondAmount
+                }("");
+                if (!sent) revert AsteroidMining__FailedToSendEther();
             }
         }
     }
@@ -496,7 +530,7 @@ contract AsteroidMining is AccessControl {
         IncentiveKey calldata key,
         uint256 nftId,
         address bondRecipient
-    ) external virtual {
+    ) external nonReentrant {
         /// -----------------------------------------------------------------------
         /// Validation
         /// -----------------------------------------------------------------------
@@ -506,7 +540,7 @@ contract AsteroidMining is AccessControl {
         // check the NFT is currently being staked in this incentive by someone other than the NFT owner
         address staker = stakers[incentiveId][nftId];
         if (staker == address(0) || staker == key.nft.ownerOf(nftId)) {
-            revert Bagholder__NotPaperHand();
+            revert AsteroidMining__NotPaperHand();
         }
 
         /// -----------------------------------------------------------------------
@@ -520,6 +554,9 @@ contract AsteroidMining is AccessControl {
         /// State updates
         /// -----------------------------------------------------------------------
 
+        // Slash miningTime
+        miningTime[staker] = 0;
+
         // accrue rewards
         (stakerInfo, incentiveInfo) = _accrueRewards(
             key,
@@ -532,6 +569,7 @@ contract AsteroidMining is AccessControl {
 
         // update staker state
         stakerInfo.numberOfStakedTokens -= 1;
+        stakerInfo.startedStaking = 0;
         stakerInfos[incentiveId][staker] = stakerInfo;
 
         // update incentive state
@@ -543,7 +581,8 @@ contract AsteroidMining is AccessControl {
         /// -----------------------------------------------------------------------
 
         // send bond to recipient as reward
-        bondRecipient.safeTransferETH(key.bondAmount);
+        (bool sent, ) = bondRecipient.call{value: key.bondAmount}("");
+        if (!sent) revert AsteroidMining__FailedToSendEther();
 
         emit SlashPaperHand(msg.sender, incentiveId, nftId, bondRecipient);
     }
@@ -552,10 +591,11 @@ contract AsteroidMining is AccessControl {
     /// @dev Will revert if the incentive key is invalid (e.g. startTime >= endTime)
     /// @param key the incentive's key
     /// @param rewardAmount the amount of reward tokens to add to the incentive
-    function createIncentive(IncentiveKey calldata key, uint256 rewardAmount)
-        external
-        virtual
-    {
+    function createIncentive(
+        IncentiveKey calldata key,
+        uint256 rewardAmount,
+        uint256 geodeMiningTime
+    ) external onlyRole(DEFAULT_ADMIN_ROLE) {
         /// -----------------------------------------------------------------------
         /// Validation
         /// -----------------------------------------------------------------------
@@ -565,7 +605,7 @@ contract AsteroidMining is AccessControl {
 
         // ensure incentive doesn't already exist
         if (incentiveInfos[incentiveId].lastUpdateTime != 0) {
-            revert Bagholder__IncentiveAlreadyExists();
+            revert AsteroidMining__IncentiveAlreadyExists();
         }
 
         // ensure incentive key is valid
@@ -575,17 +615,13 @@ contract AsteroidMining is AccessControl {
             key.startTime >= key.endTime ||
             key.endTime < block.timestamp
         ) {
-            revert Bagholder__InvalidIncentiveKey();
+            revert AsteroidMining__InvalidIncentiveKey();
         }
 
         // apply protocol fee
         uint256 protocolFeeAmount;
         if (protocolFeeInfo_.fee != 0) {
-            protocolFeeAmount = FullMath.mulDiv(
-                rewardAmount,
-                protocolFeeInfo_.fee,
-                1000
-            );
+            protocolFeeAmount = (rewardAmount * protocolFeeInfo_.fee) / 1000;
             rewardAmount -= protocolFeeAmount;
         }
 
@@ -593,7 +629,7 @@ contract AsteroidMining is AccessControl {
         uint128 rewardRatePerSecond = (rewardAmount /
             (key.endTime - key.startTime)).safeCastTo128();
         if (rewardRatePerSecond == 0) {
-            revert Bagholder__RewardAmountTooSmall();
+            revert AsteroidMining__RewardAmountTooSmall();
         }
 
         /// -----------------------------------------------------------------------
@@ -606,7 +642,8 @@ contract AsteroidMining is AccessControl {
             rewardPerTokenStored: 0,
             numberOfStakedTokens: 0,
             lastUpdateTime: block.timestamp.safeCastTo64(),
-            accruedRefund: 0
+            accruedRefund: 0,
+            miningTimeForGeodes: geodeMiningTime
         });
 
         /// -----------------------------------------------------------------------
@@ -614,15 +651,11 @@ contract AsteroidMining is AccessControl {
         /// -----------------------------------------------------------------------
 
         // transfer reward tokens from sender
-        key.rewardToken.safeTransferFrom(
-            msg.sender,
-            address(this),
-            rewardAmount
-        );
+        key.rewardToken.transferFrom(msg.sender, address(this), rewardAmount);
 
         // transfer protocol fee
         if (protocolFeeAmount != 0) {
-            key.rewardToken.safeTransferFrom(
+            key.rewardToken.transferFrom(
                 msg.sender,
                 protocolFeeInfo_.recipient,
                 protocolFeeAmount
@@ -644,7 +677,6 @@ contract AsteroidMining is AccessControl {
     /// @return rewardAmount the amount of reward tokens claimed
     function claimRewards(IncentiveKey calldata key, address recipient)
         external
-        virtual
         returns (uint256 rewardAmount)
     {
         bytes32 incentiveId = key.compute();
@@ -658,12 +690,17 @@ contract AsteroidMining is AccessControl {
 
         // ensure the incentive exists
         if (incentiveInfo.lastUpdateTime == 0) {
-            revert Bagholder__IncentiveNonexistent();
+            revert AsteroidMining__IncentiveNonexistent();
         }
 
         /// -----------------------------------------------------------------------
         /// State updates
         /// -----------------------------------------------------------------------
+
+        // accrue mining time (multiplier is numberOfStakedTokens)
+        miningTime[msg.sender] +=
+            stakerInfo.numberOfStakedTokens *
+            (block.timestamp - stakerInfo.startedStaking);
 
         // accrue rewards
         (stakerInfo, incentiveInfo) = _accrueRewards(
@@ -675,6 +712,7 @@ contract AsteroidMining is AccessControl {
         // update staker state
         rewardAmount = stakerInfo.totalRewardUnclaimed;
         stakerInfo.totalRewardUnclaimed = 0;
+        stakerInfo.startedStaking = 0;
         stakerInfos[incentiveId][msg.sender] = stakerInfo;
 
         // update incentive state
@@ -685,14 +723,19 @@ contract AsteroidMining is AccessControl {
         /// -----------------------------------------------------------------------
 
         // transfer reward to user
-        key.rewardToken.safeTransfer(recipient, rewardAmount);
+        key.rewardToken.transfer(recipient, rewardAmount);
 
         emit ClaimRewards(msg.sender, incentiveId, recipient);
+
+        // mint geodes
+        if (miningTime[msg.sender] >= incentiveInfo.miningTimeForGeodes) {
+            miningTime[msg.sender] = 0;
+            key.rewardNft.mint(recipient);
+        }
     }
 
     function claimRefund(IncentiveKey calldata key)
         external
-        virtual
         returns (uint256 refundAmount)
     {
         bytes32 incentiveId = key.compute();
@@ -706,7 +749,7 @@ contract AsteroidMining is AccessControl {
 
         // ensure the incentive exists
         if (incentiveInfo.lastUpdateTime == 0) {
-            revert Bagholder__IncentiveNonexistent();
+            revert AsteroidMining__IncentiveNonexistent();
         }
 
         /// -----------------------------------------------------------------------
@@ -739,7 +782,7 @@ contract AsteroidMining is AccessControl {
         /// -----------------------------------------------------------------------
 
         // transfer refund to recipient
-        key.rewardToken.safeTransfer(key.refundRecipient, refundAmount);
+        key.rewardToken.transfer(key.refundRecipient, refundAmount);
 
         emit ClaimRefund(msg.sender, incentiveId, refundAmount);
     }
@@ -796,14 +839,13 @@ contract AsteroidMining is AccessControl {
     /// @param protocolFeeInfo_ The new protocol fee info
     function ownerSetProtocolFee(ProtocolFeeInfo calldata protocolFeeInfo_)
         external
-        virtual
-        onlyOwner
+        onlyRole(DEFAULT_ADMIN_ROLE)
     {
         if (
             protocolFeeInfo_.fee != 0 &&
             protocolFeeInfo_.recipient == address(0)
         ) {
-            revert Bagholder_ProtocolFeeRecipientIsZero();
+            revert AsteroidMining_ProtocolFeeRecipientIsZero();
         }
         protocolFeeInfo = protocolFeeInfo_;
 
@@ -823,11 +865,9 @@ contract AsteroidMining is AccessControl {
         }
         return
             info.rewardPerTokenStored +
-            FullMath.mulDiv(
-                (lastTimeRewardApplicable - info.lastUpdateTime) * PRECISION,
-                info.rewardRatePerSecond,
-                info.numberOfStakedTokens
-            );
+            (((lastTimeRewardApplicable - info.lastUpdateTime) *
+                PRECISION *
+                info.rewardRatePerSecond) / info.numberOfStakedTokens);
     }
 
     function _earned(StakerInfo memory info, uint256 rewardPerToken_)
@@ -836,11 +876,9 @@ contract AsteroidMining is AccessControl {
         returns (uint256)
     {
         return
-            FullMath.mulDiv(
-                info.numberOfStakedTokens,
-                rewardPerToken_ - info.rewardPerTokenStored,
-                PRECISION
-            ) + info.totalRewardUnclaimed;
+            ((info.numberOfStakedTokens *
+                (rewardPerToken_ - info.rewardPerTokenStored)) / PRECISION) +
+            info.totalRewardUnclaimed;
     }
 
     function _accrueRewards(

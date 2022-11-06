@@ -1,6 +1,5 @@
 forge-std/=lib/forge-std/src/
 openzeppelin-contracts/=lib/openzeppelin-contracts/contracts/
+chainlink-contracts/=lib/chainlink/contracts/src/v0.8/
+solmate/=lib/solmate/src/
 chainlink-foundry/=lib/foundry-starter-kit/src/
-chainlink/=lib/chainlink/contracts/src/v0.8/
-bagholder/=lib/bagholder/src/
-v3-core/=lib/v3-core/contracts/

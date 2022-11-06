@@ -3,6 +3,7 @@ pragma solidity ^0.8.0;
 
 import {SpaceRats} from "../SpaceRats.sol";
 import {IridiumToken} from "../IridiumToken.sol";
+import {Geode} from "../Geode.sol";
 
 /// @param nft the NFT to incentivize
 /// @param rewardToken the token used to reward stakers
@@ -14,6 +15,7 @@ import {IridiumToken} from "../IridiumToken.sol";
 struct IncentiveKey {
     SpaceRats nft;
     IridiumToken rewardToken;
+    Geode rewardNft;
     address refundRecipient;
     uint256 startTime;
     uint256 endTime;
@@ -24,6 +26,7 @@ struct IncentiveKey {
 /// @param rewardPerTokenStored the rewardPerToken value when the staker info was last updated
 /// @param numberOfStakedTokens the number of NFTs staked by the staker in the specified incentive
 struct StakerInfo {
+    uint256 startedStaking;
     uint256 rewardPerTokenStored;
     uint192 totalRewardUnclaimed;
     uint64 numberOfStakedTokens;
@@ -42,6 +45,7 @@ struct IncentiveInfo {
     uint64 numberOfStakedTokens;
     uint64 lastUpdateTime;
     uint256 accruedRefund;
+    uint256 miningTimeForGeodes; // NEW
 }
 
 /// @param key the incentive to stake into

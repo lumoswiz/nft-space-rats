@@ -7,9 +7,13 @@ import {SpaceRats} from "../src/SpaceRats.sol";
 import {Geode} from "../src/Geode.sol";
 import {IridiumToken} from "../src/IridiumToken.sol";
 
-import "bagholder/lib/Structs.sol";
+import {IncentiveId} from "../src/staking/IncentiveId.sol";
+
+import "../src/staking/Structs.sol";
 
 contract AsteroidMiningTest is Test {
+    using IncentiveId for IncentiveKey;
+
     AsteroidMining public asteroidMining;
     SpaceRats public spaceRats;
     Geode public geode;
@@ -32,6 +36,9 @@ contract AsteroidMiningTest is Test {
     address feeRecipient = makeAddr("Fee Recipient");
     address refundRecipient = makeAddr("Refund Recipient");
     address alice = makeAddr("Alice");
+    address bob = makeAddr("Bob");
+
+    IncentiveKey key;
 
     function setUp() public {
         spaceRats = new SpaceRats(
@@ -54,8 +61,9 @@ contract AsteroidMiningTest is Test {
             PUBLIC_SALE_KEY
         );
 
-        vm.prank(alice, alice);
+        startHoax(alice, alice);
         spaceRats.whitelistMint{value: WHITELIST_PRICE}();
+        vm.stopPrank();
 
         assertEq(spaceRats.balanceOf(alice), 1);
 
@@ -64,7 +72,7 @@ contract AsteroidMiningTest is Test {
         );
 
         // setup incentive
-        IncentiveKey memory key = IncentiveKey({
+        key = IncentiveKey({
             nft: spaceRats,
             rewardToken: iridium,
             startTime: block.timestamp,
@@ -73,14 +81,60 @@ contract AsteroidMiningTest is Test {
             refundRecipient: refundRecipient
         });
 
+        // Roles - address(this) for testing
+        iridium.grantRole(iridium.MINTER_ROLE(), address(this));
+        geode.grantRole(geode.MINTER_ROLE(), address(this));
+        geode.grantRole(geode.BURNER_ROLE(), address(this));
+
+        // Minting iridium
         iridium.mint(address(this), INCENTIVE_AMOUNT);
         iridium.approve(address(asteroidMining), type(uint256).max);
+
+        // Create incentive
         asteroidMining.createIncentive(key, INCENTIVE_AMOUNT);
+
+        // Mint NFTs
+        geode.mint(alice); // tokenId = 0
+        geode.mint(alice); // tokenId = 1
+        geode.mint(bob); // tokenId = 2
+        geode.mint(bob); // tokenId = 3
     }
 
-    function test_miningDeployment() public {
-        require(address(asteroidMining) != address(0));
-    }
+    function test_stake() public {
+        startHoax(alice);
+        uint256 beforeBalance = alice.balance;
+        asteroidMining.stake{value: BOND}(key, 0);
 
-    function test_stake() public {}
+        // verify staker
+        bytes32 incentiveId = key.compute();
+        assertEq(
+            asteroidMining.stakers(incentiveId, 0),
+            alice,
+            "staker incorrect"
+        );
+
+        // verify stakerInfo
+        {
+            (, , uint64 numberOfStakedTokens) = asteroidMining.stakerInfos(
+                incentiveId,
+                alice
+            );
+            assertEq(numberOfStakedTokens, 1, "numberOfStakedTokens not 1");
+        }
+
+        // verify incentiveInfo
+        {
+            (, , uint64 numberOfStakedTokens, , ) = asteroidMining
+                .incentiveInfos(incentiveId);
+            assertEq(numberOfStakedTokens, 1, "numberOfStakedTokens not 1");
+        }
+
+        // verify bond
+        assertEqDecimal(
+            beforeBalance - alice.balance,
+            BOND,
+            18,
+            "didn't charge bond"
+        );
+    }
 }
