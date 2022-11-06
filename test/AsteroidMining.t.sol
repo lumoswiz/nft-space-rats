@@ -22,6 +22,7 @@ contract AsteroidMiningTest is Test {
     uint8 constant PROTOCOL_FEE = 10; // 1%
     uint256 constant INCENTIVE_LENGTH = 30 days;
     uint256 constant INCENTIVE_AMOUNT = 1000 ether;
+    uint256 constant GEODE_MINING_TIME = 21 days;
     uint256 constant BOND = 0.05 ether;
 
     uint256 internal constant COLLECTION_SIZE = 2000;
@@ -52,7 +53,9 @@ contract AsteroidMiningTest is Test {
 
         iridium = new IridiumToken();
 
-        spaceRats.addToWhitelist(alice, AMOUNT_FOR_WHITELIST);
+        // Add alice and bob to SpaceRats whitelist mint
+        spaceRats.addToWhitelist(alice, 2);
+        spaceRats.addToWhitelist(bob, 2);
 
         spaceRats.setupSaleInfo(
             PUBLIC_SALE_START_TIME,
@@ -62,10 +65,16 @@ contract AsteroidMiningTest is Test {
         );
 
         startHoax(alice, alice);
-        spaceRats.whitelistMint{value: WHITELIST_PRICE}();
+        spaceRats.whitelistMint{value: WHITELIST_PRICE}(); //tokenId 1
+        spaceRats.whitelistMint{value: WHITELIST_PRICE}(); //tokenId 2
+        assertEq(spaceRats.balanceOf(alice), 2);
         vm.stopPrank();
 
-        assertEq(spaceRats.balanceOf(alice), 1);
+        startHoax(bob, bob);
+        spaceRats.whitelistMint{value: WHITELIST_PRICE}(); //tokenId 3
+        spaceRats.whitelistMint{value: WHITELIST_PRICE}(); //tokenId 4
+        assertEq(spaceRats.balanceOf(bob), 2);
+        vm.stopPrank();
 
         asteroidMining = new AsteroidMining(
             ProtocolFeeInfo({recipient: feeRecipient, fee: PROTOCOL_FEE})
@@ -75,6 +84,7 @@ contract AsteroidMiningTest is Test {
         key = IncentiveKey({
             nft: spaceRats,
             rewardToken: iridium,
+            rewardNft: geode,
             startTime: block.timestamp,
             endTime: block.timestamp + INCENTIVE_LENGTH,
             bondAmount: BOND,
@@ -91,18 +101,17 @@ contract AsteroidMiningTest is Test {
         iridium.approve(address(asteroidMining), type(uint256).max);
 
         // Create incentive
-        asteroidMining.createIncentive(key, INCENTIVE_AMOUNT);
-
-        // Mint NFTs
-        geode.mint(alice); // tokenId = 0
-        geode.mint(alice); // tokenId = 1
-        geode.mint(bob); // tokenId = 2
-        geode.mint(bob); // tokenId = 3
+        asteroidMining.createIncentive(
+            key,
+            INCENTIVE_AMOUNT,
+            GEODE_MINING_TIME
+        );
     }
 
     function test_stake() public {
         startHoax(alice);
         uint256 beforeBalance = alice.balance;
+
         asteroidMining.stake{value: BOND}(key, 0);
 
         // verify staker
@@ -115,18 +124,37 @@ contract AsteroidMiningTest is Test {
 
         // verify stakerInfo
         {
-            (, , uint64 numberOfStakedTokens) = asteroidMining.stakerInfos(
-                incentiveId,
-                alice
-            );
+            (
+                uint256 startedStaking,
+                ,
+                ,
+                uint64 numberOfStakedTokens
+            ) = asteroidMining.stakerInfos(incentiveId, alice);
             assertEq(numberOfStakedTokens, 1, "numberOfStakedTokens not 1");
+            assertEq(startedStaking, block.timestamp, "startedStaking not now");
+            assertEq(
+                asteroidMining.miningTime(alice),
+                0,
+                "miningTime should be 0"
+            );
         }
 
         // verify incentiveInfo
         {
-            (, , uint64 numberOfStakedTokens, , ) = asteroidMining
-                .incentiveInfos(incentiveId);
+            (
+                ,
+                ,
+                uint64 numberOfStakedTokens,
+                ,
+                ,
+                uint256 miningTimeForGeodes
+            ) = asteroidMining.incentiveInfos(incentiveId);
             assertEq(numberOfStakedTokens, 1, "numberOfStakedTokens not 1");
+            assertEq(
+                miningTimeForGeodes,
+                GEODE_MINING_TIME,
+                "miningTimeForGeodes incorrectly set"
+            );
         }
 
         // verify bond
@@ -136,5 +164,31 @@ contract AsteroidMiningTest is Test {
             18,
             "didn't charge bond"
         );
+
+        vm.warp(block.timestamp + 5 days);
+        asteroidMining.stake{value: BOND}(key, 1);
+
+        // verify miningTime
+        assertEq(
+            asteroidMining.miningTime(alice),
+            5 days,
+            "miningTime not 5 days"
+        );
+
+        {
+            (
+                uint256 startedStaking,
+                ,
+                ,
+                uint64 numberOfStakedTokens
+            ) = asteroidMining.stakerInfos(incentiveId, alice);
+
+            assertEq(numberOfStakedTokens, 2, "Alice has staked 2 tokens");
+            assertEq(
+                startedStaking,
+                block.timestamp,
+                "startedStaking should update to now"
+            );
+        }
     }
 }
