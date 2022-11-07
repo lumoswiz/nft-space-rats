@@ -358,4 +358,137 @@ contract AsteroidMiningTest is Test {
             "didn't receive bond"
         );
     }
+
+    function test_stakeMultipleWaitAndUnstake() public {
+        startHoax(alice);
+
+        uint256 numStaked = 2;
+        uint256 initialStakingTime = block.timestamp;
+        StakeMultipleInput[] memory inputs = new StakeMultipleInput[](
+            numStaked
+        );
+        inputs[0].key = key;
+        inputs[0].nftId = 0;
+        inputs[1].key = key;
+        inputs[1].nftId = 1;
+
+        asteroidMining.stakeMultiple{value: BOND * numStaked}(inputs);
+
+        vm.warp(block.timestamp + 4 days);
+        uint256 beforeBalance = alice.balance;
+
+        asteroidMining.unstake(key, 0, alice);
+
+        // verify staker
+        bytes32 incentiveId = key.compute();
+        assertEq(
+            asteroidMining.stakers(incentiveId, 0),
+            address(0),
+            "staker incorrect"
+        );
+
+        // verify stakerInfo
+        {
+            (
+                uint256 startedStaking,
+                ,
+                ,
+                uint64 numberOfStakedTokens
+            ) = asteroidMining.stakerInfos(incentiveId, alice);
+            assertEq(numberOfStakedTokens, 1, "numberOfStakedTokens not 1");
+            assertEq(
+                startedStaking,
+                initialStakingTime,
+                "startedStaking not initialStakingTime"
+            );
+            assertEq(
+                asteroidMining.miningTime(alice),
+                numStaked * (block.timestamp - initialStakingTime),
+                "miningTime not set correctly"
+            );
+        }
+
+        // verify incentiveInfo
+        {
+            (
+                ,
+                ,
+                uint64 numberOfStakedTokens,
+                ,
+                ,
+                uint256 miningTimeForGeodes
+            ) = asteroidMining.incentiveInfos(incentiveId);
+            assertEq(numberOfStakedTokens, 1, "numberOfStakedTokens not 1");
+            assertEq(
+                miningTimeForGeodes,
+                GEODE_MINING_TIME,
+                "miningTimeForGeodes incorrectly set"
+            );
+        }
+
+        // verify bond
+        assertEqDecimal(
+            alice.balance - beforeBalance,
+            BOND,
+            18,
+            "didn't receive bond"
+        );
+    }
+
+    function test_stakeAndSlash() public {
+        startHoax(alice);
+        asteroidMining.stake{value: BOND}(key, 0);
+        spaceRats.safeTransferFrom(alice, bob, 0);
+
+        changePrank(bob);
+        uint256 beforeBalance = bob.balance;
+        asteroidMining.slashPaperHand(key, 0, bob);
+
+        // verify staker
+        bytes32 incentiveId = key.compute();
+        assertEq(
+            asteroidMining.stakers(incentiveId, 0),
+            address(0),
+            "staker incorrect"
+        );
+
+        // verify stakerInfo
+        {
+            (
+                uint256 startedStaking,
+                ,
+                ,
+                uint64 numberOfStakedTokens
+            ) = asteroidMining.stakerInfos(incentiveId, alice);
+            assertEq(numberOfStakedTokens, 0, "numberOfStakedTokens not 0");
+            assertEq(startedStaking, 0, "startedStaking not 0");
+            assertEq(asteroidMining.miningTime(alice), 0, "miningTime not 0");
+        }
+
+        // verify incentiveInfo
+        {
+            (
+                ,
+                ,
+                uint64 numberOfStakedTokens,
+                ,
+                ,
+                uint256 miningTimeForGeodes
+            ) = asteroidMining.incentiveInfos(incentiveId);
+            assertEq(numberOfStakedTokens, 0, "numberOfStakedTokens not 0");
+            assertEq(
+                miningTimeForGeodes,
+                GEODE_MINING_TIME,
+                "miningTimeForGeodes incorrectly set"
+            );
+        }
+
+        // verify bond
+        assertEqDecimal(
+            bob.balance - beforeBalance,
+            BOND,
+            18,
+            "didn't receive bond"
+        );
+    }
 }
