@@ -49,6 +49,8 @@ contract SpaceRatsIntegrationTest is Test {
     uint256 constant GEODE_MINING_TIME = 21 days;
     uint256 constant BOND = 0.05 ether;
     uint256 constant MAX_ERROR_PERCENT = 1e9; // 10**-9
+    uint256 constant INCENTIVE_AMOUNT_AFTER_FEE =
+        (INCENTIVE_AMOUNT * (1000 - PROTOCOL_FEE)) / 1000;
 
     IncentiveKey key;
 
@@ -163,7 +165,77 @@ contract SpaceRatsIntegrationTest is Test {
 
     function test_stakeWaitClaimRewards() public {
         startHoax(alice, alice);
+        uint256 beforeBalance = alice.balance;
 
         asteroidMining.stake{value: BOND}(key, 0);
+
+        skip(INCENTIVE_LENGTH + 1 days);
+
+        // verify reward amount
+        assertApproxEqRel(
+            asteroidMining.earned(key, alice),
+            INCENTIVE_AMOUNT_AFTER_FEE,
+            MAX_ERROR_PERCENT,
+            "alice reward amount incorrect"
+        );
+
+        asteroidMining.claimRewards(key, alice);
+
+        assertEq(geode.balanceOf(alice, 0), 1, "Alice geode balance not 1");
+        assertApproxEqRel(
+            iridium.balanceOf(alice),
+            INCENTIVE_AMOUNT_AFTER_FEE,
+            MAX_ERROR_PERCENT,
+            "Alice iridium balance incorrect"
+        );
+    }
+
+    function test_stakeToCrackGeodes() public {
+        startHoax(alice, alice);
+
+        uint256 iridiumBefore = iridium.balanceOf(alice);
+
+        asteroidMining.stake{value: BOND}(key, 0);
+        skip(INCENTIVE_LENGTH + 1 days);
+        asteroidMining.claimRewards(key, alice);
+
+        // set approval of geode for plant
+        geode.setApprovalForAll(address(plant), true);
+
+        uint256 tokenId = 0;
+        assertEq(
+            geode.balanceOf(alice, tokenId),
+            1,
+            "Alice geode balance not 1"
+        );
+
+        plant.processGeode(tokenId);
+        vm.stopPrank();
+
+        uint256 processRound = plant.processRound();
+
+        // skip to the end of the processing round
+        skip(4 days);
+
+        startHoax(multiSig, multiSig);
+
+        uint256 requestId = plant.requestRandomness(processRound);
+        vrfCoordinator.fulfillRandomWords(requestId, address(plant));
+        plant.crackGeodes(processRound);
+
+        // verify iridium rewards from asteroidMining and cracking a geode
+        assertApproxEqRel(
+            iridium.balanceOf(alice) - iridiumBefore,
+            INCENTIVE_AMOUNT_AFTER_FEE + plant.iridiumRewards(),
+            MAX_ERROR_PERCENT,
+            "iridium rewards incorrect"
+        );
+
+        // verify whitelist spot
+        assertEq(
+            plant.exercisableWhitelistSpots(alice),
+            0,
+            "random word not 100: whitelist spot not 0"
+        );
     }
 }
