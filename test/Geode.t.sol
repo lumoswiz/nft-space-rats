@@ -45,7 +45,7 @@ contract GeodeUnitTest is Test {
         );
     }
 
-    function test_balanceOfBatchSignleAddress() public {
+    function test_balanceOfBatchSingleAddress() public {
         uint256 mintTotal = 4;
         uint256[] memory ids = new uint256[](mintTotal);
 
