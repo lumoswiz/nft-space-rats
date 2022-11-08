@@ -42,19 +42,19 @@ Problem specification from project brief:
   - `crackGeodes` assigns random values to geode tokenIds, batch burns the deposited tokenIds then allocates rewards based on the random value of the tokenId. The base reward for cracking geodes is set by the admin to be `iridiumRewards` and there is a 1% chance to earn a whitelist spot for future expansion NFTS (tracked by `exercisableWhitelistSpots`).
   - Future expansion NFT projects (with the role: `WHITELIST_DECREMENT_ROLE`) can call `decrementExercisableWhitelistSpots` upon the user exercising their whitelist spot/s.
 
-Role Assignment:
+**Role Assignment:**
 
 - Geode:
 
-  - MINTER_ROLE: Asteroid Mining staking contract.
-  - BURNER_ROLE: Processing Plant contract.
+  - `MINTER_ROLE`: Asteroid Mining staking contract.
+  - `BURNER_ROLE`: Processing Plant contract.
 
 - Iridium:
 
-  - MINTER_ROLE: Space Rats multi sig, Asteroid Mining staking contract and Processing Plant contract.
+  - `MINTER_ROLE`: Space Rats multi sig, Asteroid Mining staking contract and Processing Plant contract.
 
 - Processing Plant:
-  - WHITELIST_DECREMENT_ROLE: future expansion NFT projects.
+  - `WHITELIST_DECREMENT_ROLE`: future expansion NFT projects.
 
 ## Testing
 
