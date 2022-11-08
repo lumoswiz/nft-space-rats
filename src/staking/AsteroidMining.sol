@@ -830,6 +830,19 @@ contract AsteroidMining is AccessControl, ReentrancyGuard {
             );
     }
 
+    function getMiningTime(IncentiveKey calldata key, address staker)
+        external
+        view
+        returns (uint256 time)
+    {
+        bytes32 incentiveId = key.compute();
+        StakerInfo memory info = stakerInfos[incentiveId][staker];
+
+        time =
+            info.numberOfStakedTokens *
+            (block.timestamp - info.startedStaking);
+    }
+
     /// -----------------------------------------------------------------------
     /// Owner functions
     /// -----------------------------------------------------------------------

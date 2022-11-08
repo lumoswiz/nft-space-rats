@@ -19,9 +19,12 @@ contract AsteroidMiningTest is Test {
     Geode public geode;
     IridiumToken public iridium;
 
-    uint8 constant PROTOCOL_FEE = 10; // 1%
     uint256 constant INCENTIVE_LENGTH = 30 days;
     uint256 constant INCENTIVE_AMOUNT = 1000 ether;
+    uint256 constant MAX_ERROR_PERCENT = 1e9; // 10**-9
+    uint8 constant PROTOCOL_FEE = 10; // 1%
+    uint256 constant INCENTIVE_AMOUNT_AFTER_FEE =
+        (INCENTIVE_AMOUNT * (1000 - PROTOCOL_FEE)) / 1000;
     uint256 constant GEODE_MINING_TIME = 21 days;
     uint256 constant BOND = 0.05 ether;
 
@@ -65,14 +68,14 @@ contract AsteroidMiningTest is Test {
         );
 
         startHoax(alice, alice);
+        spaceRats.whitelistMint{value: WHITELIST_PRICE}(); //tokenId 0
         spaceRats.whitelistMint{value: WHITELIST_PRICE}(); //tokenId 1
         spaceRats.whitelistMint{value: WHITELIST_PRICE}(); //tokenId 2
-        spaceRats.whitelistMint{value: WHITELIST_PRICE}(); //tokenId 3
         assertEq(spaceRats.balanceOf(alice), 3);
         vm.stopPrank();
 
         startHoax(bob, bob);
-        spaceRats.whitelistMint{value: WHITELIST_PRICE}(); //tokenId 4
+        spaceRats.whitelistMint{value: WHITELIST_PRICE}(); //tokenId 3
         assertEq(spaceRats.balanceOf(bob), 1);
         vm.stopPrank();
 
@@ -489,6 +492,172 @@ contract AsteroidMiningTest is Test {
             BOND,
             18,
             "didn't receive bond"
+        );
+    }
+
+    function test_restake() public {
+        // setup another incentive
+        IncentiveKey memory k = IncentiveKey({
+            nft: spaceRats,
+            rewardToken: iridium,
+            rewardNft: geode,
+            startTime: block.timestamp,
+            endTime: block.timestamp + INCENTIVE_LENGTH,
+            bondAmount: BOND / 2,
+            refundRecipient: refundRecipient
+        });
+
+        // Minting iridium
+        iridium.mint(address(this), INCENTIVE_AMOUNT);
+        asteroidMining.createIncentive(
+            k,
+            INCENTIVE_AMOUNT,
+            GEODE_MINING_TIME / 2
+        );
+
+        // stake NFT 0 in first incentive and restake NFT 1 in second incentive
+        startHoax(alice);
+        asteroidMining.stake{value: BOND}(key, 0);
+        uint256 beforeBalance = alice.balance;
+        asteroidMining.restake(key, 0, k, 1, alice);
+
+        // verify staker
+        assertEq(
+            asteroidMining.stakers(key.compute(), 0),
+            address(0),
+            "staker incorrect"
+        );
+        assertEq(
+            asteroidMining.stakers(k.compute(), 1),
+            alice,
+            "staker incorrect"
+        );
+
+        // verify stakerInfo
+        {
+            (
+                uint256 startedStaking,
+                ,
+                ,
+                uint64 numberOfStakedTokens
+            ) = asteroidMining.stakerInfos(key.compute(), alice);
+            assertEq(
+                numberOfStakedTokens,
+                0,
+                "unstaker: numberOfStakedTokens not 0"
+            );
+            assertEq(startedStaking, 0, "startedStaking not 0");
+            assertEq(asteroidMining.miningTime(alice), 0, "miningTime not 0");
+        }
+        {
+            (
+                uint256 startedStaking,
+                ,
+                ,
+                uint64 numberOfStakedTokens
+            ) = asteroidMining.stakerInfos(k.compute(), alice);
+            assertEq(
+                numberOfStakedTokens,
+                1,
+                "staker: numberOfStakedTokens not 1"
+            );
+            assertEq(startedStaking, block.timestamp, "startedStaking not 0");
+            assertEq(asteroidMining.miningTime(alice), 0, "miningTime not 0");
+        }
+
+        // verify incentiveInfo
+        {
+            (
+                ,
+                ,
+                uint64 numberOfStakedTokens,
+                ,
+                ,
+                uint256 miningTimeForGeodes
+            ) = asteroidMining.incentiveInfos(key.compute());
+            assertEq(
+                numberOfStakedTokens,
+                0,
+                "unstake incentive: numberOfStakedTokens not 0"
+            );
+            assertEq(
+                miningTimeForGeodes,
+                GEODE_MINING_TIME,
+                "miningTimeForGeodes incorrectly set"
+            );
+        }
+        {
+            (
+                ,
+                ,
+                uint64 numberOfStakedTokens,
+                ,
+                ,
+                uint256 miningTimeForGeodes
+            ) = asteroidMining.incentiveInfos(k.compute());
+            assertEq(
+                numberOfStakedTokens,
+                1,
+                "stake incentive: numberOfStakedTokens not 1"
+            );
+            assertEq(
+                miningTimeForGeodes,
+                GEODE_MINING_TIME / 2,
+                "miningTimeForGeodes incorrectly set"
+            );
+        }
+
+        // verify bond
+        assertEqDecimal(
+            alice.balance - beforeBalance,
+            BOND / 2,
+            18,
+            "didn't receive bond"
+        );
+    }
+
+    function test_twoStakersAndWait() public {
+        /**
+            Alice stakes NFT 0 and 1
+            BoB stakes NFT 4
+            Both wait for 1/3 of the incentive length
+        */
+
+        startHoax(alice);
+        asteroidMining.stake{value: BOND}(key, 0);
+        asteroidMining.stake{value: BOND}(key, 1);
+
+        changePrank(bob);
+        asteroidMining.stake{value: BOND}(key, 3);
+
+        skip(INCENTIVE_LENGTH / 3);
+
+        // verify reward amount
+        assertApproxEqRel(
+            asteroidMining.earned(key, alice),
+            2 * (INCENTIVE_AMOUNT_AFTER_FEE / 3 / 3),
+            MAX_ERROR_PERCENT,
+            "alice reward amount incorrect"
+        );
+
+        assertApproxEqRel(
+            asteroidMining.earned(key, bob),
+            INCENTIVE_AMOUNT_AFTER_FEE / 3 / 3,
+            MAX_ERROR_PERCENT,
+            "bob reward amount incorrect"
+        );
+
+        // verify mining time
+        assertEq(
+            asteroidMining.getMiningTime(key, alice),
+            ((2 * INCENTIVE_LENGTH) / 3),
+            "alice: miningTime incorrect"
+        );
+
+        assertEq(
+            asteroidMining.getMiningTime(key, bob),
+            INCENTIVE_LENGTH / 3,
+            "bob: miningTime incorrect"
         );
     }
 }
