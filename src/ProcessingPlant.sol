@@ -50,6 +50,8 @@ contract ProcessingPlant is
     error ProcessingPlant__RequestIdUnfulfilled();
     error ProcessingPlant__MismatchedArrayLengths();
     error ProcessingPlant__IridiumRewardsCannotBeZero();
+    error ProcessingPlant__CannotDecrementByZero();
+    error ProcessingPlant__CannotDecrement();
 
     /// -----------------------------------------------------------------------
     /// Immutable parameters
@@ -67,6 +69,9 @@ contract ProcessingPlant is
     /// -----------------------------------------------------------------------
     IridiumToken public iridium;
     Geode public geode;
+
+    bytes32 public constant WHITELIST_DECREMENT_ROLE =
+        keccak256("WHITELIST_DECREMENT_ROLE");
 
     uint256 public iridiumRewards;
 
@@ -137,7 +142,7 @@ contract ProcessingPlant is
     }
 
     /// -----------------------------------------------------------------------
-    /// Role actions: DEFAULT_ROLE_ADMIN
+    /// Role actions: DEFAULT_ROLE_ADMIN, WHITELIST_DECREMENT_ROLE
     /// -----------------------------------------------------------------------
 
     // Consider using a MAX_BATCH_SIZE for `requestRandomness`
@@ -258,6 +263,21 @@ contract ProcessingPlant is
         onlyRole(DEFAULT_ADMIN_ROLE)
     {
         iridium = iridium_;
+    }
+
+    /// @notice Decrement exercisable whitelist spots by acounts with role: WHITELIST_DECREMENT_ROLE.
+    /// Enables future expansion NFT projects to decrement upon whitelist spot being exercised by user.
+    function decrementExercisableWhitelistSpots(address account, uint256 value)
+        external
+        onlyRole(WHITELIST_DECREMENT_ROLE)
+    {
+        if (value == 0) revert ProcessingPlant__CannotDecrementByZero();
+
+        uint256 currentSpots = exercisableWhitelistSpots[account];
+
+        if (currentSpots == 0) revert ProcessingPlant__CannotDecrement();
+
+        exercisableWhitelistSpots[account] = currentSpots - value;
     }
 
     /// -----------------------------------------------------------------------
