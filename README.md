@@ -15,13 +15,34 @@ Problem specification from project brief:
 - Geodes can be cracked open to earn rewards, such as: whitelist spots, more Iridium tokens or spaceship keys.
 - Spaceship art design to be finalised, but anticipate that spaceship keys will be used to unlock additional functional, such as: reward mining speed.
 
-## Todo
+## Solution Outline
 
-- Modify Bagholder.sol contract to:
-  - [ ] Handle rewards (ERC-20, ERC-721, ERC-1155); ERC1155Holder.sol
-  - [ ] Functionality to transfer ERC-1155 tokens out of staking contract.
-- [ ] Implement Geodes contract (including MINTER_ROLE).
-- [x] Implement Iridium token contract (including MINTER_ROLE).
+- [SpaceRats](./src/SpaceRats.sol) is an ERC721A contract. The collection size (public and whitelist slots) and a limit of maximum mints per address during mint is set in the constructor.
+- [IridiumToken](./src/IridiumToken.sol) is an ERC20 contract with roles. Accounts with the `MINTER_ROLE` can mint new iridium tokens.
+- [Geode](./src/Geode.sol) is an ERC-1155 (mintable and burnable) contract with roles. Accounts with the `MINTER_ROLE` can mint new tokens with a tokenID set by a token counter and an amount of 1 (NFTs).
+- [AsteroidMining](./src/staking/AsteroidMining.sol) is an optimistic NFT staking contract which is a [Bagholder](https://github.com/ZeframLou/bagholder) fork (written by [ZeframLou](https://twitter.com/boredGenius)). I have modified this contract to:
+  - Accept SpaceRats NFTs and reward iridium tokens and geodes.
+  - Incentives have a minimum staking (mining) time to earn geodes, tracked in IncentiveInfo structs.
+  - Track address total mining times across incentives. At any point, if the user has no Space Rats staked, the mining time can be set back to zero. When claiming rewards, if the user mining time exceeds `miningTimeForGeodes`, the AsteroidMining contract will mint a geode as well as transferring iridium rewards to them.
+- [ProcessingPlant](./src/ProcessingPlant.sol) is a contract that handles burning geodes and making Chainlink VRF V2 (Subscription Method) requests to obtain random numbers for determining user rewards. The contract works as follows:
+
+  - The contract has process rounds (3 day periods) where users can deposit geodes to be cracked.
+  - When the process round expires, the admin (SpaceRats multi sig) makes a VRF request for a number of random values equal to number of deposited geodes. Once fulfilled, the admin can call `crackGeodes` for the process round.
+  - `crackGeodes` assigns random values to geode tokenIds, batch burns the deposited tokenIds then allocates rewards based on the random value of the tokenId. The base reward for cracking geodes is set by the admin to be `iridiumRewards` and there is a 1% chance to earn a whitelist spot for future expansion NFTS (tracked by `exercisableWhitelistSpots`).
+
+  ## Testing
+
+Unit tests:
+
+- [SpaceRats](./test/SpaceRats.t.sol)
+- [Iridium](./test/Iridium.t.sol)
+- [Geode](./test/Geode.t.sol)
+- [AsteroidMining](./test/AsteroidMining.t.sol)
+- [ProcessingPlant](./test/ProcessingPlant.t.sol)
+
+Project tests:
+
+- [SpaceRatsProject](./test/SpaceRatsProject.t.sol)
 
 ## Acknowledgements
 

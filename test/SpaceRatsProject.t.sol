@@ -15,7 +15,7 @@ import {LinkToken} from "chainlink-foundry/test/mocks/LinkToken.sol";
 import {IncentiveId} from "../src/staking/IncentiveId.sol";
 import "../src/staking/Structs.sol";
 
-contract SpaceRatsIntegrationTest is Test {
+contract SpaceRatsProjectTest is Test {
     // Contracts
     SpaceRats public spaceRats;
     IridiumToken public iridium;
@@ -236,6 +236,14 @@ contract SpaceRatsIntegrationTest is Test {
             plant.exercisableWhitelistSpots(alice),
             0,
             "random word not 100: whitelist spot not 0"
+        );
+
+        // verify geode balances
+        assertEq(geode.balanceOf(alice, 0), 0, "Alice geode balance not 0");
+        assertEq(
+            geode.balanceOf(address(plant), 0),
+            0,
+            "ProcessingPlant geode balance not 0"
         );
     }
 }

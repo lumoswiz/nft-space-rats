@@ -114,6 +114,8 @@ contract ProcessingPlant is
         s_subscriptionId = subscriptionId;
     }
 
+    /// @notice Users with geodes transfer them to this contract for processing to earn additional rewards (iridium, whitelist spots).
+    /// @param tokenId geode tokenId to transfer and crack
     function processGeode(uint256 tokenId) external nonReentrant {
         if (geode.balanceOf(msg.sender, tokenId) == 0)
             revert ProcessingPlant__AccountDoesNotOwnThatTokenId();
@@ -134,8 +136,18 @@ contract ProcessingPlant is
         rewardsFor[tokenId] = msg.sender;
     }
 
+    /// -----------------------------------------------------------------------
+    /// Role actions: DEFAULT_ROLE_ADMIN
+    /// -----------------------------------------------------------------------
+
     // Consider using a MAX_BATCH_SIZE for `requestRandomness`
     // Then track the next index to run request for in that processRound_
+    ///@notice At the end of a process round, the admin can calls this function to make a chainlink VRF v2
+    /// requestRandomWords call. s_numWords should be equal to the number of tokenIds deposited in a given
+    /// processRound.
+    /// @dev Admin needs to use a Subscription method with Chainlink VRF as Direct Funding method maximum
+    /// random values is 10 (500 for sub).
+    /// @param processRound_ an expired process round
     function requestRandomness(uint256 processRound_)
         external
         onlyRole(DEFAULT_ADMIN_ROLE)
@@ -173,6 +185,7 @@ contract ProcessingPlant is
         });
     }
 
+    /// @notice Chainlink VRF V2 callback function
     function fulfillRandomWords(uint256 requestId, uint256[] memory randomWords)
         internal
         override
@@ -184,6 +197,10 @@ contract ProcessingPlant is
         s_requests[requestId].randomWords = randomWords;
     }
 
+    /// @notice Allocates random words to tokenIds, burns geodes and allocates rewards depending on random number
+    /// returned for the tokenId. If random number == 100, the owner of the tokenId will earn a whitelist spot +
+    /// iridium rewards.
+    /// @param processRound_ an expired process round
     function crackGeodes(uint256 processRound_)
         external
         onlyRole(DEFAULT_ADMIN_ROLE)
@@ -226,6 +243,8 @@ contract ProcessingPlant is
         }
     }
 
+    /// @notice Sets iridium reward amount for cracking geodes
+    /// @param rewardAmount iridium reward amount
     function setIridiumRewardAmount(uint256 rewardAmount)
         external
         onlyRole(DEFAULT_ADMIN_ROLE)
@@ -233,6 +252,7 @@ contract ProcessingPlant is
         iridiumRewards = rewardAmount;
     }
 
+    /// @notice Updates iridium contract implementation (in the event that the project requires a V2 contract)
     function updateIridiumImplementation(IridiumToken iridium_)
         external
         onlyRole(DEFAULT_ADMIN_ROLE)
@@ -240,12 +260,9 @@ contract ProcessingPlant is
         iridium = iridium_;
     }
 
-    function updateGeodeImplementation(Geode geode_)
-        external
-        onlyRole(DEFAULT_ADMIN_ROLE)
-    {
-        geode = geode_;
-    }
+    /// -----------------------------------------------------------------------
+    /// Override
+    /// -----------------------------------------------------------------------
 
     function supportsInterface(bytes4 interfaceId)
         public
@@ -256,6 +273,10 @@ contract ProcessingPlant is
     {
         return super.supportsInterface(interfaceId);
     }
+
+    /// -----------------------------------------------------------------------
+    /// Helpers
+    /// -----------------------------------------------------------------------
 
     function getRandomWords(uint256 _requestId)
         public
