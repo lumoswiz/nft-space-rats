@@ -5,6 +5,17 @@
 ## Setup
 
 - Install [Foundry](https://github.com/foundry-rs/foundry).
+- To run all tests, in command line enter:
+
+```sh
+forge test
+```
+
+- To run a specific test (with stack and setup traces displayed):
+
+```sh
+forge test --match-contract [CONTRACT_NAME] --match-test [TEST_NAME] -vvvvv
+```
 
 ## Exercise Description
 
